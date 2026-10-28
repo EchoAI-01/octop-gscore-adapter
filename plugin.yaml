@@ -1,0 +1,13 @@
+id: octop-gscore-adapter
+version: v0.0.1-beta
+name: GsCore Connector（早柚核心连接器）
+kind: hook
+entry: main.py
+description: >-
+  Global connector between Octop and GsCore / gsuid-core. It does not create an
+  IM channel: every existing Octop IM channel keeps feeding the Agent normally,
+  while the connector mirrors inbound messages to GsCore before Agent-side group
+  gating and routes GsCore replies back through the originating channel.
+  Supports OneBot 11, QQ official bot and Feishu channels, meta events, recall
+  receipts, recall and mute control packets.
+requires: []

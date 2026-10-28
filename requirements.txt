@@ -1,0 +1,10 @@
+# Runtime dependencies
+#
+# There are no third-party Python packages to install.  This plugin only uses
+# modules that ship with Octop: octop-harness / octop-gateway, aiohttp,
+# websockets and lark-oapi (the latter two are already used by Octop's built-in
+# Feishu / QQ channels).
+#
+# Keep this file comment-only on purpose: Octop's plugin loader runs
+# `pip install -r requirements.txt` when the file exists, and an empty
+# dependency set must not perturb the host environment.

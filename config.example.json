@@ -1,0 +1,18 @@
+{
+  "enabled": false,
+  "gscore_host": "localhost",
+  "gscore_port": 8765,
+  "gscore_ws_url": "",
+  "gscore_ws_token": "",
+  "gscore_bot_id": "Octop",
+  "gscore_max_retry": 30,
+  "gscore_reconnect_seconds": 5.0,
+  "gscore_connect_timeout": 8.0,
+  "onebot_bot_id": "onebot",
+  "qq_group_bot_id": "qqgroup",
+  "qq_guild_bot_id": "qqguild",
+  "feishu_bot_id": "feishu",
+  "channel_types": "onebot11,qq,feishu",
+  "admin_user_ids": "",
+  "status_interval_seconds": 2.0
+}
