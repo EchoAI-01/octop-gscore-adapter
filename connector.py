@@ -123,9 +123,9 @@ def install_global_hooks() -> None:
     try:
         from octop.infra.server import OctopServer
     except Exception:  # pragma: no cover - only in non-Octop hosts
-        return
+        OctopServer = None
 
-    if not getattr(OctopServer, "_gscore_stop_hook", False):
+    if OctopServer is not None and not getattr(OctopServer, "_gscore_stop_hook", False):
         original_stop = OctopServer.stop
 
         async def stop_with_gscore(self: Any) -> None:
@@ -137,6 +137,24 @@ def install_global_hooks() -> None:
 
         OctopServer.stop = stop_with_gscore  # type: ignore[method-assign]
         OctopServer._gscore_stop_hook = True  # type: ignore[attr-defined]
+
+    try:
+        from octop_gateway.manager import ChannelManager
+    except Exception:  # pragma: no cover
+        return
+
+    if not getattr(ChannelManager, "_gscore_register_hook", False):
+        original_register = ChannelManager._register_channel
+
+        async def register_with_gscore(self: Any, channel: BaseChannel) -> str:
+            channel_id = await original_register(self, channel)
+            connector = getattr(BaseChannel, "_gscore_connector", None)
+            if connector is not None and connector.is_allowed_channel(channel):
+                connector.register_channel(channel)
+            return channel_id
+
+        ChannelManager._register_channel = register_with_gscore  # type: ignore[method-assign]
+        ChannelManager._gscore_register_hook = True  # type: ignore[attr-defined]
 
 
 class GsCoreConnector:
@@ -217,6 +235,14 @@ class GsCoreConnector:
         task = asyncio.create_task(self.observe_raw(channel, raw_payload))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    def register_channel(self, channel: BaseChannel) -> None:
+        """Remember a live channel so proactive GsCore messages can route."""
+        self._channels[channel.channel_id] = channel
+        self._write_status()
+
+    def is_allowed_channel(self, channel: BaseChannel) -> bool:
+        return self._allowed_channel(channel)
 
     # ------------------------------------------------------------------
     # Channel filtering / normalization
