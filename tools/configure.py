@@ -33,10 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token-stdin", action="store_true", help="read WS_TOKEN from stdin")
     parser.add_argument("--bot-id", help="route bot_id (/ws/{bot_id})")
     parser.add_argument("--onebot-bot-id")
-    parser.add_argument("--qq-group-bot-id")
-    parser.add_argument("--qq-guild-bot-id")
-    parser.add_argument("--feishu-bot-id")
-    parser.add_argument("--channel-types", help="comma separated: onebot11,qq,feishu")
+    parser.add_argument("--qq-group-bot-id", help="QQ official platform bot_id (reference: qq_official)")
+    parser.add_argument("--feishu-bot-id", help="Feishu platform bot_id (reference: lark)")
+    parser.add_argument("--channel-types", help="optional allowlist; empty observes every non-control channel")
+    parser.add_argument("--gscore-only-prefixes", help="messages matching these prefixes skip the Agent path")
     parser.add_argument("--admin-user-ids", help="comma separated platform user ids")
     return parser
 
@@ -66,12 +66,12 @@ def main() -> int:
         config.onebot_bot_id = args.onebot_bot_id
     if args.qq_group_bot_id is not None:
         config.qq_group_bot_id = args.qq_group_bot_id
-    if args.qq_guild_bot_id is not None:
-        config.qq_guild_bot_id = args.qq_guild_bot_id
     if args.feishu_bot_id is not None:
         config.feishu_bot_id = args.feishu_bot_id
     if args.channel_types is not None:
         config.channel_types = args.channel_types
+    if args.gscore_only_prefixes is not None:
+        config.gscore_only_prefixes = args.gscore_only_prefixes
     if args.admin_user_ids is not None:
         config.admin_user_ids = args.admin_user_ids
 
@@ -85,9 +85,9 @@ def main() -> int:
             args.bot_id,
             args.onebot_bot_id,
             args.qq_group_bot_id,
-            args.qq_guild_bot_id,
             args.feishu_bot_id,
             args.channel_types,
+            args.gscore_only_prefixes,
             args.admin_user_ids,
         )
     ) or args.enable or args.disable or args.token_stdin:
@@ -103,9 +103,9 @@ def main() -> int:
             args.bot_id,
             args.onebot_bot_id,
             args.qq_group_bot_id,
-            args.qq_guild_bot_id,
             args.feishu_bot_id,
             args.channel_types,
+            args.gscore_only_prefixes,
             args.admin_user_ids,
         )
     ):

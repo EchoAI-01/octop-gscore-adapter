@@ -84,22 +84,24 @@ class ConnectorConfig:
     gscore_port: int = 8765
     gscore_ws_url: str = ""
     gscore_ws_token: str = ""
-    gscore_bot_id: str = "Octop"
+    gscore_bot_id: str = "AstrBot"
     gscore_max_retry: int = 30
     gscore_reconnect_seconds: float = 5.0
     gscore_connect_timeout: float = 8.0
 
-    # Platform ids reported to GsCore
+    # Platform ids reported to GsCore (reference/AstrBot naming)
     onebot_bot_id: str = "onebot"
-    qq_group_bot_id: str = "qqgroup"
-    qq_guild_bot_id: str = "qqguild"
-    feishu_bot_id: str = "feishu"
+    qq_group_bot_id: str = "qq_official"
+    feishu_bot_id: str = "lark"
+
+    # Reference GSCORE_ONLY_PREFIXES: report to GsCore and stop the Agent path
+    gscore_only_prefixes: str = ""
 
     # Permissions
     admin_user_ids: str = ""
 
-    # Which Octop channel types to observe (comma separated).
-    channel_types: str = "onebot11,qq,feishu"
+    # Which Octop channel types to observe; empty means every non-control channel.
+    channel_types: str = ""
 
     # Observability
     status_interval_seconds: float = 2.0
@@ -112,12 +114,15 @@ class ConnectorConfig:
             "gscore_bot_id",
             "onebot_bot_id",
             "qq_group_bot_id",
-            "qq_guild_bot_id",
             "feishu_bot_id",
+            "gscore_only_prefixes",
             "admin_user_ids",
             "channel_types",
         ):
-            setattr(self, name, str(getattr(self, name) or "").strip())
+            raw = getattr(self, name)
+            if isinstance(raw, (list, tuple, set)):
+                raw = ",".join(str(item) for item in raw)
+            setattr(self, name, str(raw or "").strip())
 
         self.enabled = to_bool(self.enabled, False)
         self.gscore_port = to_int(self.gscore_port, 8765)
@@ -140,6 +145,10 @@ class ConnectorConfig:
     @property
     def admin_ids(self) -> frozenset[str]:
         return frozenset(split_values(self.admin_user_ids))
+
+    @property
+    def only_prefixes(self) -> tuple[str, ...]:
+        return split_values(self.gscore_only_prefixes)
 
     @property
     def allowed_channel_types(self) -> frozenset[str]:
@@ -169,7 +178,21 @@ class ConnectorConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Self:
         known = {field for field in cls.__dataclass_fields__}
-        return cls(**{key: value for key, value in data.items() if key in known})
+        merged = dict(data)
+        # Accept the AstrBot reference plugin's config keys verbatim so users can
+        # copy the same values without re-deciding names.
+        aliases = {
+            "BOT_ID": "gscore_bot_id",
+            "IP": "gscore_host",
+            "PORT": "gscore_port",
+            "WS_TOKEN": "gscore_ws_token",
+            "MAX_RETRY_TIMES": "gscore_max_retry",
+            "GSCORE_ONLY_PREFIXES": "gscore_only_prefixes",
+        }
+        for source, target in aliases.items():
+            if source in merged and target not in merged:
+                merged[target] = merged[source]
+        return cls(**{key: value for key, value in merged.items() if key in known})
 
     @classmethod
     def load(cls, path: Path) -> Self:
@@ -199,8 +222,8 @@ class ConnectorConfig:
             "gscore_reconnect_seconds": ("GSCORE_RECONNECT_SECONDS", to_float),
             "onebot_bot_id": ("GSCORE_ONEBOT_BOT_ID", str),
             "qq_group_bot_id": ("GSCORE_QQ_GROUP_BOT_ID", str),
-            "qq_guild_bot_id": ("GSCORE_QQ_GUILD_BOT_ID", str),
             "feishu_bot_id": ("GSCORE_FEISHU_BOT_ID", str),
+            "gscore_only_prefixes": ("GSCORE_ONLY_PREFIXES", str),
             "admin_user_ids": ("GSCORE_ADMIN_USER_IDS", str),
             "channel_types": ("GSCORE_CHANNEL_TYPES", str),
         }

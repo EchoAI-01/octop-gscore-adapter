@@ -113,12 +113,43 @@ def install_global_hooks() -> None:
 
         async def handle_inbound_with_gscore(self: BaseChannel, raw_payload: Any) -> None:
             connector = getattr(BaseChannel, "_gscore_connector", None)
-            if connector is not None:
-                connector.schedule_observe(self, raw_payload)
-            return await original_handle(self, raw_payload)
+            if connector is None:
+                return await original_handle(self, raw_payload)
+            parsed = connector.parse_for_observation(self, raw_payload)
+            if parsed is None:
+                return await original_handle(self, raw_payload)
+            connector.schedule_observe(self, parsed)
+            if connector.is_gscore_only(parsed):
+                # Reference plugin calls event.stop_event(); Octop's equivalent
+                # is a flag consumed by the GlobalProcessor wrapper below.
+                parsed.metadata["gscore_block_agent"] = True
+            return await original_handle(self, parsed)
 
         BaseChannel.handle_inbound = handle_inbound_with_gscore  # type: ignore[method-assign]
         BaseChannel._gscore_handle_hook = True  # type: ignore[attr-defined]
+
+    try:
+        from octop.infra.gateway.process import GlobalProcessor
+    except Exception:  # pragma: no cover - only in non-Octop hosts
+        GlobalProcessor = None
+
+    if GlobalProcessor is not None and not getattr(
+        GlobalProcessor, "_gscore_agent_hook", False
+    ):
+        original_call = GlobalProcessor.__call__
+
+        async def call_with_gscore(self: Any, message: InboundMessage) -> Any:
+            metadata = getattr(message, "metadata", None) or {}
+            if metadata.get("gscore_block_agent"):
+                logger.info(
+                    "[GsCoreConnector] 消息命中 GSCORE_ONLY_PREFIXES，已跳过 Agent 流程"
+                )
+                return
+            async for event in original_call(self, message):
+                yield event
+
+        GlobalProcessor.__call__ = call_with_gscore  # type: ignore[method-assign]
+        GlobalProcessor._gscore_agent_hook = True  # type: ignore[attr-defined]
 
     try:
         from octop.infra.server import OctopServer
@@ -257,22 +288,44 @@ class GsCoreConnector:
         return channel_type in allowed
 
     async def observe_raw(self, channel: BaseChannel, raw_payload: Any) -> None:
+        message = self.parse_for_observation(channel, raw_payload)
+        if message is None:
+            return
         try:
-            if not self._allowed_channel(channel):
-                return
-            message = (
-                raw_payload
-                if isinstance(raw_payload, InboundMessage)
-                else channel.parse_inbound(raw_payload)
-            )
-            if not isinstance(message, InboundMessage):
-                return
             await self.observe_message(channel, message)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - never break the channel pipeline
             self._last_error = f"解析入站消息失败: {_short(exc)}"
             logger.debug("[GsCoreConnector] 解析入站消息失败", exc_info=True)
+
+    def parse_for_observation(
+        self,
+        channel: BaseChannel,
+        raw_payload: Any,
+    ) -> InboundMessage | None:
+        """Parse once in the tap so Agent and GsCore see the same object."""
+        if not self._running or not self._allowed_channel(channel):
+            return None
+        try:
+            message = (
+                raw_payload
+                if isinstance(raw_payload, InboundMessage)
+                else channel.parse_inbound(raw_payload)
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._last_error = f"解析入站消息失败: {_short(exc)}"
+            logger.debug("[GsCoreConnector] 解析入站消息失败", exc_info=True)
+            return None
+        return message if isinstance(message, InboundMessage) else None
+
+    def is_gscore_only(self, message: InboundMessage) -> bool:
+        """Mirror reference ``GSCORE_ONLY_PREFIXES`` / ``event.stop_event()``."""
+        prefixes = self._config.only_prefixes
+        if not prefixes:
+            return False
+        text = message.text.lstrip()
+        return bool(text and text.startswith(prefixes))
 
     async def observe_message(
         self,
@@ -373,12 +426,9 @@ class GsCoreConnector:
         if channel_type == "onebot11":
             return self._config.onebot_bot_id or "onebot"
         if channel_type == "qq":
-            msg_type = str(metadata.get("msg_type") or "")
-            if msg_type in {"channel", "direct"}:
-                return self._config.qq_guild_bot_id or "qqguild"
-            return self._config.qq_group_bot_id or "qqgroup"
+            return self._config.qq_group_bot_id or "qq_official"
         if channel_type == "feishu":
-            return self._config.feishu_bot_id or "feishu"
+            return self._config.feishu_bot_id or "lark"
         return channel_type or "unknown"
 
     def _channel_matches_bot_id(self, channel: BaseChannel, bot_id: str) -> bool:
@@ -387,14 +437,12 @@ class GsCoreConnector:
         if channel_type == "onebot11":
             return base == (self._config.onebot_bot_id or "onebot").split(":", 1)[0]
         if channel_type == "qq":
-            return base in {
-                (self._config.qq_group_bot_id or "qqgroup").split(":", 1)[0],
-                (self._config.qq_guild_bot_id or "qqguild").split(":", 1)[0],
-            }
+            return base == (self._config.qq_group_bot_id or "qq_official").split(":", 1)[0]
         if channel_type == "feishu":
             return base in {
-                (self._config.feishu_bot_id or "feishu").split(":", 1)[0],
+                (self._config.feishu_bot_id or "lark").split(":", 1)[0],
                 "lark",
+                "feishu",
             }
         return base == channel_type
 
@@ -417,17 +465,18 @@ class GsCoreConnector:
         elif metadata.get("temp_group_id"):
             group_id = str(metadata.get("temp_group_id")) or None
         user_id = self._user_id(metadata, subject_id)
-        msg_id = str(metadata.get("message_id") or metadata.get("msg_id") or "")
+        # Reference plugin: msg_id is the platform session id, not the platform
+        # message id.  The actual inbound message id is cached for passive
+        # replies / quotes.
+        msg_id = str(inbound.channel_session_id or "")
         if not msg_id:
-            msg_id = str(inbound.channel_session_id or "")
+            msg_id = str(metadata.get("message_id") or metadata.get("msg_id") or "")
 
         role = str(metadata.get("role") or "").lower()
-        if user_id and user_id in self._config.admin_ids:
+        if user_id and (
+            user_id in self._config.admin_ids or role in {"owner", "admin"}
+        ):
             user_pm = 1
-        elif role == "owner":
-            user_pm = 2
-        elif role == "admin":
-            user_pm = 3
         else:
             user_pm = 6
 
@@ -751,9 +800,7 @@ class GsCoreConnector:
                 meta.setdefault("to_handle", target_id)
                 subject_id = target_id
             if channel_type == "qq":
-                msg_type = str(meta.get("msg_type") or "")
-                guild_id = (self._config.qq_guild_bot_id or "qqguild").split(":", 1)[0]
-                is_guild = msg_type == "channel" or str(msg.bot_id).split(":", 1)[0] == guild_id
+                is_guild = str(meta.get("msg_type") or "") == "channel"
                 if is_guild:
                     meta["msg_type"] = "channel"
                     meta.setdefault("channel_id_native", target_id)
@@ -769,11 +816,7 @@ class GsCoreConnector:
             if channel_type == "onebot11":
                 meta["chat_type"] = "dm"
             elif channel_type == "qq":
-                guild_id = (self._config.qq_guild_bot_id or "qqguild").split(":", 1)[0]
-                if (
-                    str(meta.get("msg_type") or "") == "direct"
-                    or str(msg.bot_id).split(":", 1)[0] == guild_id
-                ):
+                if str(meta.get("msg_type") or "") == "direct":
                     meta["msg_type"] = "direct"
                     meta.setdefault("guild_id", cached.get("guild_id") or "")
                 else:
@@ -783,7 +826,10 @@ class GsCoreConnector:
                 meta.setdefault("to_handle", target_id)
                 meta.setdefault("chat_id", cached.get("chat_id") or target_id)
 
-        anchor = str(msg.msg_id or cached.get("message_id") or cached.get("msg_id") or "")
+        # Reference plugin reuses the most recent inbound platform message id
+        # for passive replies (QQ) / thread replies (Feishu).  MessageSend.msg_id
+        # is the session id and must not be used as a platform message id.
+        anchor = str(cached.get("message_id") or cached.get("msg_id") or "")
         if anchor:
             meta["msg_id"] = anchor
             meta["message_id"] = anchor

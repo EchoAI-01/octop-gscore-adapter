@@ -91,7 +91,7 @@ async def main() -> None:
             timeout=15,
         )
         assert report["user_id"] == "8888"
-        assert report["msg_id"] == "7101"
+        assert report["msg_id"]  # reference uses the platform session id here
         # This message was not @-mentioned; the report proves the tap runs
         # before the channel's Agent group gate.
         assert not any(item["type"] == "at" for item in report["content"])

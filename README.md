@@ -110,19 +110,23 @@ docker exec octop python /data/.octop/plugins/octop-gscore-adapter/tools/configu
 | `gscore_port` | `8765` | GsCore 端口 |
 | `gscore_ws_url` | 空 | 完整地址（高级）；支持 `{bot_id}`；留空自动拼 `/ws/{bot_id}` |
 | `gscore_ws_token` | 空 | 对应 core 的 `WS_TOKEN` |
-| `gscore_bot_id` | `Octop` | 连接级路由 ID；同一 core 上多个连接器请使用不同值 |
+| `gscore_bot_id` | `AstrBot` | 连接级路由 ID，与参考项目 `BOT_ID` 默认值一致 |
 | `gscore_max_retry` | `30` | 连续失败上限；`-1` 无限重试 |
 | `gscore_reconnect_seconds` | `5` | 断线重连间隔 |
 | `gscore_connect_timeout` | `8` | 建连超时 |
 | `onebot_bot_id` | `onebot` | 上报给 GsCore 的 OneBot 平台 ID |
-| `qq_group_bot_id` | `qqgroup` | QQ 群/单聊平台 ID |
-| `qq_guild_bot_id` | `qqguild` | QQ 频道平台 ID |
-| `feishu_bot_id` | `feishu` | 飞书平台 ID |
-| `channel_types` | `onebot11,qq,feishu` | 要旁路监听的 Octop 通道类型（逗号分隔） |
+| `qq_group_bot_id` | `qq_official` | QQ 官方平台 ID（参考项目口径，群/单聊/频道统一） |
+| `feishu_bot_id` | `lark` | 飞书平台 ID（参考项目口径） |
+| `gscore_only_prefixes` | 空 | 命中前缀的消息仍上报 GsCore，但跳过 Octop Agent（等价 `event.stop_event()`） |
+| `channel_types` | 空 | 要旁路监听的通道类型；**空表示所有非控制通道** |
 | `admin_user_ids` | 空 | 上报 `user_pm=1` 的平台用户 ID，逗号分隔 |
 | `status_interval_seconds` | `2` | 状态文件/配置热加载轮询间隔 |
 
-环境变量可覆盖同名配置：`GSCORE_ENABLED`、`GSCORE_HOST`、`GSCORE_PORT`、`GSCORE_WS_TOKEN`、`GSCORE_BOT_ID`、`GSCORE_CHANNEL_TYPES` 等。
+`user_pm` 与参考项目一致：群主/管理员或 `admin_user_ids` 命中为 `1`，其余为 `6`。
+
+环境变量可覆盖同名配置：`GSCORE_ENABLED`、`GSCORE_HOST`、`GSCORE_PORT`、`GSCORE_WS_TOKEN`、`GSCORE_BOT_ID`、`GSCORE_ONLY_PREFIXES`、`GSCORE_CHANNEL_TYPES` 等。
+
+同时兼容参考项目的原始键名：`BOT_ID`、`IP`、`PORT`、`WS_TOKEN`、`MAX_RETRY_TIMES`、`GSCORE_ONLY_PREFIXES`。
 
 ## 通道侧注意事项
 
@@ -136,9 +140,9 @@ docker exec octop python /data/.octop/plugins/octop-gscore-adapter/tools/configu
 
 ## 协议映射
 
-- **平台 ID**：OneBot 11 → `onebot`；QQ 群/单聊 → `qqgroup`；QQ 频道 → `qqguild`；飞书 → `feishu`。
-- **账号 ID**：`bot_self_id` 使用 Octop 通道 ID（稳定、唯一）。`@` 机器人时上报 `at=<通道 ID>`，core 据此设置 `is_tome`。
-- **消息 ID**：上报平台原始 `message_id`，用于 QQ 被动回复、引用和回执。
+- **平台 ID（与参考项目一致）**：OneBot 11 → `onebot`；QQ 官方（群/单聊/频道）→ `qq_official`；飞书 → `lark`；其他通道 → 通道类型名。
+- **账号 ID**：`bot_self_id` 使用 Octop 通道 ID，对应参考项目的 `event.get_platform_id()`。`@` 机器人时上报 `at=<通道 ID>`，core 据此设置 `is_tome`。
+- **消息 ID**：`MessageReceive.msg_id` 与参考项目一致，使用平台会话 ID；平台原始 `message_id` 缓存在连接器内，用于 QQ 被动回复、引用和回执。
 - **引用**：上报 `reply_id`（平台消息 ID）+ `reply`（正文）；下发 `reply` / `reply_id` 都按消息 ID 引用。
 - **合并转发**：上报展开为扁平 `node`；OneBot 下发使用原生合并转发，其他通道逐条展开。
 - **回执**：`echo` 非空一定回 `recall_message_id`；拿不到平台 ID 也回 `id=None`。

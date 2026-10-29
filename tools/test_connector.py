@@ -134,8 +134,12 @@ async def main() -> None:
     core = MockGsCore(route_bot_id="Octop")
     await core.start()
     agent_seen: list[InboundMessage] = []
+    blocked_seen: list[InboundMessage] = []
 
     async def processor(message):
+        if message.metadata.get("gscore_block_agent"):
+            blocked_seen.append(message)
+            return
         agent_seen.append(message)
         yield MessageEvent.completed()
 
@@ -149,6 +153,7 @@ async def main() -> None:
                 "gscore_bot_id": "Octop",
                 "gscore_reconnect_seconds": "0.5",
                 "channel_types": "fake,onebot11",
+                "gscore_only_prefixes": "core",
             }
         ).save(config_path)
 
@@ -168,7 +173,7 @@ async def main() -> None:
             )
             assert report["bot_self_id"] == "chan-1"
             assert report["user_id"] == "u1"
-            assert report["msg_id"] == "m1"
+            assert report["msg_id"] == "s1"
             assert any(
                 item["type"] == "at" and item["data"] == "chan-1"
                 for item in report["content"]
@@ -180,7 +185,7 @@ async def main() -> None:
                 {
                     "bot_id": "fake",
                     "bot_self_id": "chan-1",
-                    "msg_id": "m1",
+                    "msg_id": "s1",
                     "target_type": "group",
                     "target_id": "g1",
                     "content": [{"type": "text", "data": "GsCore 回复"}],
@@ -194,6 +199,8 @@ async def main() -> None:
             subject, parts = fake.sent[-1]
             assert subject.chat_type == "group"
             assert subject.metadata["group_id"] == "g1"
+            # Reference semantics: MessageSend.msg_id is a session id; the
+            # passive anchor is the cached inbound platform message id.
             assert subject.metadata["msg_id"] == "m1"
             assert any(part.text == "GsCore 回复" for part in parts if isinstance(part, TextContent))
 
@@ -201,6 +208,17 @@ async def main() -> None:
                 lambda p: types_of(p) == ["recall_message_id"], timeout=5
             )
             assert receipt["content"][0]["data"]["echo"] == "echo-1"
+
+            # Reference GSCORE_ONLY_PREFIXES: report to GsCore, block Agent.
+            await fake.handle_inbound(make_inbound("chan-1", text="core隐藏指令"))
+            blocked_report = await core.wait_for(
+                lambda p: p.get("group_id") == "g1"
+                and "core隐藏指令" in text_of(p),
+                timeout=8,
+            )
+            assert blocked_report["bot_self_id"] == "chan-1"
+            assert blocked_seen and blocked_seen[-1].text == "core隐藏指令"
+            assert all(item.text != "core隐藏指令" for item in agent_seen)
 
             # Meta event path.
             await connector.observe_onebot_notice(

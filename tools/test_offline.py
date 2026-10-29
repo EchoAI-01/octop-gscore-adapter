@@ -45,6 +45,9 @@ def test_config() -> None:
     assert cfg.gscore_max_retry == -1
     assert cfg.gscore_reconnect_seconds == 2.5
     assert cfg.allowed_channel_types == frozenset({"onebot11", "qq"})
+    assert cfg.gscore_bot_id == "AstrBot"
+    assert cfg.qq_group_bot_id == "qq_official"
+    assert cfg.feishu_bot_id == "lark"
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "gscore" / "config.json"
@@ -52,6 +55,7 @@ def test_config() -> None:
         loaded = ConnectorConfig.load(path)
         assert loaded.gscore_port == 9000
         assert loaded.channel_types == "onebot11, qq"
+        assert loaded.gscore_bot_id == "AstrBot"
         payload = json.loads(path.read_text())
         assert payload["enabled"] is True
 
@@ -76,6 +80,14 @@ def test_url_building() -> None:
         {"gscore_host": "127.0.0.1", "gscore_port": 8765, "gscore_bot_id": "Octop"}
     )
     assert build_ws_url(cfg) == "ws://127.0.0.1:8765/ws/Octop"
+
+    reference_cfg = ConnectorConfig.from_dict(
+        {"BOT_ID": "AstrBot", "IP": "core", "PORT": 8765, "MAX_RETRY_TIMES": 7, "GSCORE_ONLY_PREFIXES": ["core", "gs"]}
+    )
+    assert reference_cfg.gscore_bot_id == "AstrBot"
+    assert reference_cfg.gscore_host == "core"
+    assert reference_cfg.gscore_max_retry == 7
+    assert reference_cfg.only_prefixes == ("core", "gs")
 
     cfg = ConnectorConfig.from_dict(
         {
@@ -198,6 +210,24 @@ def test_hook_idempotent() -> None:
     assert before is not first or getattr(before, "__name__", "") == "handle_inbound_with_gscore"
 
 
+def test_reference_prefix_block() -> None:
+    from octop.infra.gateway.process import GlobalProcessor
+    from octop_gateway.models import InboundMessage
+
+    connector_mod.install_global_hooks()
+    message = InboundMessage(
+        channel_id="chan-1",
+        content=[],
+        metadata={"gscore_block_agent": True},
+    )
+
+    async def run() -> None:
+        events = [event async for event in GlobalProcessor.__call__(object(), message)]
+        assert events == []
+
+    asyncio.run(run())
+
+
 def main() -> None:
     test_config()
     test_url_building()
@@ -205,6 +235,7 @@ def main() -> None:
     test_content_conversion()
     test_helpers()
     test_hook_idempotent()
+    test_reference_prefix_block()
     print("offline tests: OK")
 
 

@@ -40,8 +40,8 @@ async def tapped(channel, raw_payload):
 
 每个上报包：
 
-- `bot_id`：平台 ID（`onebot` / `qqgroup` / `qqguild` / `feishu` / 其他通道类型）；
-- `bot_self_id`：**Octop 通道 ID**。它稳定、唯一，同时用于：
+- `bot_id`：平台 ID（`onebot` / `qq_official` / `lark` / 其他通道类型，与参考项目一致）；
+- `bot_self_id`：**Octop 通道 ID**（等价参考项目的 `event.get_platform_id()`）。它稳定、唯一，同时用于：
   - core 判定 `is_tome`（上报时插入 `at=bot_self_id`）；
   - core 回复时定位原通道实例。
 
@@ -57,10 +57,20 @@ async def tapped(channel, raw_payload):
 ## 配置与状态
 
 - 配置放在 `$OCTOP_HOME/gscore/config.json`，不随插件目录重装丢失；
+- 兼容参考项目配置键：`BOT_ID` / `IP` / `PORT` / `WS_TOKEN` / `MAX_RETRY_TIMES` / `GSCORE_ONLY_PREFIXES`；
 - 环境变量可覆盖；
 - 每 2 秒检查 mtime，变更后重建 GsCoreClient（无需重启 Octop）；
 - `$OCTOP_HOME/gscore/status.json` 输出连接状态、已观察通道、最近消息时间；
 - `tools/configure.py` 写入配置，`tools/status.py` 读取状态。
+
+## 与参考项目一致的语义
+
+- `GSCORE_ONLY_PREFIXES`：命中时仍上报 GsCore，但通过消息标记跳过 `GlobalProcessor`（等价 `event.stop_event()`）。
+- `bot_id` 命名：`onebot` / `qq_official` / `lark`。
+- `user_pm`：管理员/群主为 1，其余 6。
+- `MessageReceive.msg_id` 使用平台会话 ID；平台消息 ID 仅缓存用于被动回复/引用/回执。
+- 元事件只在 OneBot 11（aiocqhttp）上产生。
+- `echo` 回执、`excute_delete_message` / `excute_ban_user` 控制包语义一致。
 
 ## 生命周期
 
