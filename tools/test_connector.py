@@ -162,6 +162,15 @@ async def main() -> None:
         BaseChannel._gscore_connector = connector
         await connector.start()
         try:
+            import os
+
+            os.environ["GSCORE_ONLY_PREFIXES"] = "env-prefix"
+            await asyncio.sleep(2.6)
+            assert connector.config.only_prefixes == ("env-prefix",)
+            os.environ.pop("GSCORE_ONLY_PREFIXES", None)
+            await asyncio.sleep(2.6)
+            assert connector.config.only_prefixes == ("core",)
+
             fake = FakeChannel(processor, "chan-1")
             await fake.handle_inbound(make_inbound("chan-1", text="触发词"))
 

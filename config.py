@@ -249,6 +249,27 @@ class ConnectorConfig:
         )
         temp.replace(path)
 
+    @staticmethod
+    def env_signature() -> tuple[tuple[str, str], ...]:
+        """Snapshot only GSCORE_* env keys for hot reload."""
+        keys = (
+            "GSCORE_ENABLED",
+            "GSCORE_HOST",
+            "GSCORE_PORT",
+            "GSCORE_WS_URL",
+            "GSCORE_WS_TOKEN",
+            "GSCORE_BOT_ID",
+            "GSCORE_MAX_RETRY",
+            "GSCORE_RECONNECT_SECONDS",
+            "GSCORE_ONEBOT_BOT_ID",
+            "GSCORE_QQ_GROUP_BOT_ID",
+            "GSCORE_FEISHU_BOT_ID",
+            "GSCORE_ONLY_PREFIXES",
+            "GSCORE_ADMIN_USER_IDS",
+            "GSCORE_CHANNEL_TYPES",
+        )
+        return tuple((key, os.environ.get(key, "")) for key in keys)
+
 
 __all__ = [
     "ConnectorConfig",

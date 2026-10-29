@@ -85,6 +85,31 @@ $OCTOP_HOME/gscore/config.json
 
 首次加载会自动创建一份 `enabled: false` 的默认配置。
 
+### 在 Octop 页面中配置（推荐，无需 CLI）
+
+Octop 自带的 **设置 → 环境变量** 页面可以直接填写以下变量，连接器会在约 2 秒内热加载：
+
+```text
+GSCORE_ENABLED=true
+GSCORE_HOST=gsuid_core
+GSCORE_PORT=8765
+GSCORE_WS_TOKEN=你的 WS_TOKEN
+GSCORE_BOT_ID=AstrBot
+```
+
+可选变量：
+
+```text
+GSCORE_ONLY_PREFIXES=core,gs
+GSCORE_CHANNEL_TYPES=          # 留空=所有非控制通道
+GSCORE_ONEBOT_BOT_ID=onebot
+GSCORE_QQ_GROUP_BOT_ID=qq_official
+GSCORE_FEISHU_BOT_ID=lark
+GSCORE_ADMIN_USER_IDS=
+```
+
+> 为什么连接器列表里没有「GsCore」卡片：Octop 的 Connectors 是 **MCP 工具连接器目录**，`kind` 由核心 `catalog.json` 固定，插件只能注册 `tool / skill / hook / channel`，不能注册 connector kind。因此本插件使用 `kind: hook`，配置走 Octop 的「环境变量」页面或配置文件；这两种方式都不需要改 Octop 核心。若必须在 Connectors 页面出现专用卡片，则需要对 Octop 核心做扩展，而不是插件本身能完成的事情。
+
 ### 使用配置工具
 
 ```bash

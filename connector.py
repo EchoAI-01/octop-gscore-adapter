@@ -204,6 +204,7 @@ class GsCoreConnector:
         self._watch_task: asyncio.Task[None] | None = None
         self._running = False
         self._last_config_mtime_ns = 0
+        self._last_env_signature = ConnectorConfig.env_signature()
         self._last_message_at = 0.0
         self._last_error: str | None = None
         self._last_status = ""
@@ -221,6 +222,7 @@ class GsCoreConnector:
             return
         self._running = True
         self._last_config_mtime_ns = self._config_mtime_ns()
+        self._last_env_signature = ConnectorConfig.env_signature()
         self._write_status()
         if self._config.enabled:
             missing = self._config.missing_fields()
@@ -1121,8 +1123,14 @@ class GsCoreConnector:
             self._ensure_notice_hook()
             try:
                 mtime = self._config_mtime_ns()
-                if mtime and mtime != self._last_config_mtime_ns:
+                env_signature = ConnectorConfig.env_signature()
+                env_changed = env_signature != self._last_env_signature
+                file_changed = bool(mtime and mtime != self._last_config_mtime_ns)
+                if env_changed:
+                    self._last_env_signature = env_signature
+                if file_changed:
                     self._last_config_mtime_ns = mtime
+                if env_changed or file_changed:
                     await self._reload_config()
             except Exception as exc:  # noqa: BLE001
                 self._last_error = f"配置热加载失败: {_short(exc)}"
