@@ -261,12 +261,19 @@ async def main() -> None:
                 }
             )
             deadline = asyncio.get_running_loop().time() + 5
-            while not onebot.segments and asyncio.get_running_loop().time() < deadline:
+            while not any(
+                action in {"send_group_msg", "send_group_forward_msg"}
+                for action, _ in onebot.actions
+            ) and asyncio.get_running_loop().time() < deadline:
                 await asyncio.sleep(0.05)
-            assert onebot.segments, "OneBot segments not sent"
-            _, segments = onebot.segments[-1]
+            send_actions = [item for item in onebot.actions if item[0] == "send_group_msg"]
+            assert send_actions, onebot.actions
+            segments = send_actions[-1][1]["message"]
             assert [seg["type"] for seg in segments][:3] == ["reply", "at", "text"]
-            assert onebot.forwards and len(onebot.forwards[-1][1]) == 2
+            forward_actions = [
+                item for item in onebot.actions if item[0] == "send_group_forward_msg"
+            ]
+            assert forward_actions and len(forward_actions[-1][1]["messages"]) == 2
 
             await core.send_packet(
                 {

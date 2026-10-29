@@ -73,12 +73,15 @@ async def main() -> None:
         write_result(result)
 
         # Give the connector's watch loop time to install the notice hook.
+        # Use a unique message id: OneBot channels dedupe by account+chat+id,
+        # so a fixed probe id would be dropped on a second run.
         await asyncio.sleep(2.5)
+        probe_message_id = int(time.time() * 1000)
         await napcat.send_event(
             {
                 "post_type": "message",
                 "message_type": "group",
-                "message_id": 7101,
+                "message_id": probe_message_id,
                 "user_id": 8888,
                 "group_id": 6666,
                 "message": [{"type": "text", "data": {"text": "连接器监听测试"}}],
@@ -102,7 +105,7 @@ async def main() -> None:
             {
                 "bot_id": "onebot",
                 "bot_self_id": report["bot_self_id"],
-                "msg_id": "7101",
+                "msg_id": report["msg_id"],
                 "target_type": "group",
                 "target_id": "6666",
                 "content": [{"type": "text", "data": "GsCore 关键词回复"}],
@@ -117,7 +120,8 @@ async def main() -> None:
             lambda p: types_of(p) == ["recall_message_id"], timeout=15
         )
         assert receipt["content"][0]["data"]["echo"] == "live-echo"
-        result["checks"].append("recall_message_id receipt returned")
+        assert receipt["content"][0]["data"]["id"] is not None
+        result["checks"].append("recall_message_id receipt returned with platform id")
         write_result(result)
 
         await core.send_packet(

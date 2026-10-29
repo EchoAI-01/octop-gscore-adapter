@@ -749,21 +749,7 @@ class GsCoreConnector:
         if str(getattr(channel, "channel_type", "")) == "onebot11" and hasattr(
             channel, "push_segments"
         ):
-            segments, nodes = self._onebot_content(channel, content)
-            if nodes:
-                if is_group:
-                    await channel.push_forward(subject, nodes)  # type: ignore[attr-defined]
-                else:
-                    # OneBot's private forward API is not exposed by the
-                    # onebot11 plugin's helper; flatten private nodes instead.
-                    for node in nodes:
-                        data = node.get("data") if isinstance(node.get("data"), dict) else {}
-                        for seg in data.get("content") or []:
-                            if isinstance(seg, dict):
-                                segments.append(seg)
-            if segments:
-                await channel.push_segments(subject, segments)  # type: ignore[attr-defined]
-            return None
+            return await self._send_onebot(channel, content, is_group, target_id)
 
         parts: list[ContentPart] = gs_items_to_parts(
             content,
@@ -775,6 +761,121 @@ class GsCoreConnector:
         await channel._acquire_rate_slot()
         await channel._send_content(subject, parts)
         return None
+
+    async def _send_onebot(
+        self,
+        channel: BaseChannel,
+        content: list[GsMessage],
+        is_group: bool,
+        target_id: str,
+    ) -> str | list[str] | None:
+        """Reference ``aiocqhttp_send`` semantics: direct send + id capture."""
+        segments, nodes = self._onebot_content(channel, content)
+        temp_group = _extra_group_id(content)
+        if temp_group and not is_group:
+            for node in nodes:
+                data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                for seg in data.get("content") or []:
+                    if isinstance(seg, dict):
+                        segments.append(seg)
+            nodes = []
+
+        if not segments and not nodes:
+            return None
+
+        # Offline: use the onebot11 plugin's outbox so messages are not lost.
+        # It does not expose platform message ids, so the echo id is None.
+        if not bool(getattr(channel, "is_connected", False)):
+            subject = ChannelSubject(
+                subject_id=f"group:{target_id}" if is_group else target_id,
+                chat_type="group" if is_group else "direct",
+                metadata={
+                    "chat_type": "group" if is_group else "dm",
+                    "is_group": is_group,
+                    "group_id": target_id if is_group else "",
+                    "user_id": "" if is_group else target_id,
+                    "sender_id": "" if is_group else target_id,
+                },
+            )
+            if nodes and is_group:
+                await channel.push_forward(subject, nodes)  # type: ignore[attr-defined]
+            elif nodes:
+                for node in nodes:
+                    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                    for seg in data.get("content") or []:
+                        if isinstance(seg, dict):
+                            segments.append(seg)
+            if segments:
+                await channel.push_segments(subject, segments)  # type: ignore[attr-defined]
+            return None
+
+        ids: list[str] = []
+
+        async def send_action(action: str, params: dict[str, Any]) -> None:
+            data = await channel._call_api(action, params)  # type: ignore[attr-defined]
+            if isinstance(data, dict) and data.get("message_id") is not None:
+                ids.append(str(data["message_id"]))
+
+        await channel._acquire_rate_slot()
+        if nodes:
+            if is_group:
+                await send_action(
+                    "send_group_forward_msg",
+                    {"group_id": _id_value(target_id), "messages": nodes},
+                )
+            else:
+                await send_action(
+                    "send_private_forward_msg",
+                    {"user_id": _id_value(target_id), "messages": nodes},
+                )
+
+        files = [seg for seg in segments if str(seg.get("type")) == "file"]
+        ordinary = [seg for seg in segments if str(seg.get("type")) != "file"]
+        if ordinary:
+            await self._onebot_dispatch(
+                channel, ordinary, is_group, target_id, temp_group, send_action
+            )
+            await asyncio.sleep(0.35)
+        for seg in files:
+            await self._onebot_dispatch(
+                channel, [seg], is_group, target_id, temp_group, send_action
+            )
+            await asyncio.sleep(0.35)
+
+        if not ids:
+            return None
+        return ids[0] if len(ids) == 1 else ids
+
+    async def _onebot_dispatch(
+        self,
+        channel: BaseChannel,
+        segments: list[dict[str, Any]],
+        is_group: bool,
+        target_id: str,
+        temp_group: str,
+        sender: Any,
+    ) -> None:
+        if is_group:
+            await sender(
+                "send_group_msg",
+                {"group_id": _id_value(target_id), "message": segments},
+            )
+            return
+        if temp_group:
+            await sender(
+                "send_msg",
+                {
+                    "message_type": "private",
+                    "user_id": _id_value(target_id),
+                    "group_id": _id_value(temp_group),
+                    "message": segments,
+                },
+            )
+            return
+        await sender(
+            "send_private_msg",
+            {"user_id": _id_value(target_id), "message": segments},
+        )
 
     def _build_subject(
         self,
@@ -857,6 +958,9 @@ class GsCoreConnector:
             segment = self._onebot_segment(item)
             if segment is not None:
                 segments.append(segment)
+        replies = [seg for seg in segments if seg.get("type") == "reply"]
+        if replies:
+            segments = replies + [seg for seg in segments if seg.get("type") != "reply"]
         return segments, nodes
 
     def _onebot_nodes(
@@ -1109,6 +1213,16 @@ class GsCoreConnector:
             self._last_status = encoded
         except OSError:
             logger.debug("[GsCoreConnector] 写状态文件失败", exc_info=True)
+
+
+def _extra_group_id(content: list[GsMessage] | None) -> str:
+    """Reference ``extra_group_id_from_content`` (SnowLuma temp private)."""
+    if not content:
+        return ""
+    for item in content:
+        if item.type == "group" and item.data is not None:
+            return str(item.data)
+    return ""
 
 
 def _onebot_media_segment(seg_type: str, value: Any) -> dict[str, Any] | None:
